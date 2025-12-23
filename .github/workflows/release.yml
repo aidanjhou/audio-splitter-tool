@@ -1,0 +1,54 @@
+name: Build and Release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  # 第一阶段：编译所有架构，并暂存到 GitHub 中转站 (Artifacts)
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64, os_label: windows, arch_label: amd64, ext: .exe }
+          - { goos: windows, goarch: arm64, os_label: windows, arch_label: arm64, ext: .exe }
+          - { goos: linux, goarch: amd64, os_label: linux, arch_label: amd64, ext: "" }
+          - { goos: linux, goarch: arm64, os_label: linux, arch_label: arm64, ext: "" }
+          - { goos: darwin, goarch: amd64, os_label: darwin, arch_label: amd64, ext: "" }
+          - { goos: darwin, goarch: arm64, os_label: darwin, arch_label: arm64, ext: "" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - name: Build
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          OUTPUT_NAME=audio-splitter-tool-${{ matrix.os_label }}-${{ matrix.arch_label }}${{ matrix.ext }}
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags "-X 'main.version=$VERSION' -s -w" -o $OUTPUT_NAME .
+      - name: Upload to Temporary Space
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os_label }}-${{ matrix.arch_label }}
+          path: audio-splitter-tool-*
+
+  # 第二阶段：等上面 6 个全部编完，由这个任务一次性把所有文件挂到 Release 上
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all built files
+        uses: actions/download-artifact@v4
+        with:
+          path: ./release-assets
+          merge-multiple: true # 将 6 个文件合并到一个文件夹
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./release-assets/audio-splitter-tool-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
